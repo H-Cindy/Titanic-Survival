@@ -1,0 +1,102 @@
+---
+title: "Untitled"
+author: "Cindy Hou"
+date: "8/21/2021"
+output: html_document
+---
+
+Part 1: Import libraries & data
+
+```{r}
+library(car)
+library(MASS)
+library(leaps)
+library("randomForest")
+
+train <- read.csv("~/Desktop/Kaggle/titanic/train.csv", stringsAsFactors = TRUE)
+test <- read.csv("~/Desktop/Kaggle/titanic/test.csv", stringsAsFactors=TRUE)
+test$Survived <- NA
+
+#combining both sets of data for later cleaning
+titanicAll <- rbind(train, test)
+```
+
+Familiarizing myself with the data
+```{r}
+head(train)
+head(test)
+
+str(train)
+str(test)
+str(titanicAll)
+```
+
+2. Data cleaning & dealing with missing values
+```{r}
+# Checking for missing values
+colSums(titanicAll == "")
+colSums(is.na(titanicAll))
+
+table(titanicAll$Embarked)
+```
+There are only 2 values missing in embarked, so I'm filling the missing values in with the most frequent Embarked value by far, "S." Similarly, since there are is only 1 missing fare value, I'm filling it in with the mean fare value.
+
+```{r}
+titanicAll$Embarked[titanicAll$Embarked == ""] <- "S"
+
+titanicAll$Fare[is.na(titanicAll$Fare)] = mean(titanicAll$Fare, na.rm=TRUE)
+```
+
+As there are so many Cabin values missing (> half the entries), I'm choosing not to take the Cabin values into account at all. 
+```{r}
+titanicAll <- subset(titanicAll, select = -Cabin)
+```
+
+Lastly, there are a decent amount of missing ages, so I will be more careful in filling in the values as simply filling it in with the mean can have a large effect on the final predictive model. Instead, I'm using linear regression to predict age based on known values of PClass, sex, fare, and embarked.
+```{r}
+lm.age <- lm(Age ~ Fare + Pclass + Sex + Embarked, data = titanicAll)
+
+#extract PClass, Sex, Fare, and Embarked values from empty rows
+extractFromMissingAge <- titanicAll[is.na(titanicAll$Age), c("Pclass", "Sex", "Fare", "Embarked")]
+
+newAge <- predict(lm.age, newdata = extractFromMissingAge)
+
+titanicAll$Age[is.na(titanicAll$Age)] = newAge
+
+# making sure there are no more missing values
+colSums(titanicAll == "")
+colSums(is.na(titanicAll))
+```
+
+After cleaning the data, I'm setting factors and separating the data back into the original train and test sets
+```{r message=FALSE, warnings=FALSE}
+titanicAll$Pclass <- as.factor(titanicAll$Pclass)
+titanicAll$Sex <- as.factor(titanicAll$Sex)
+titanicAll$Embarked <- as.factor(titanicAll$Embarked)
+
+trainNew <- subset(titanicAll, PassengerId == train$PassengerId)
+
+trainNew$Survived <- as.factor(trainNew$Survived)
+
+testNew <- subset(titanicAll, PassengerId != train$PassengerId)
+
+
+```
+
+4. Model 2: Model using random forest
+```{r}
+rfModel <- randomForest(Survived ~ Pclass + Sex + Age + SibSp + Parch + Fare + Embarked, data = trainNew, ntree = 500, mtry = 3, nodesize = 0.01*nrow(test), importance=TRUE)
+
+predictedSurvivalTest <- predict(rfModel, newdata = testNew)
+
+testNew$Survived <- predictedSurvivalTest
+```
+
+```{r}
+# preparing submission
+submission <- data.frame(testNew$PassengerId, testNew$Survived)
+colnames(submission) <- c("PassengerId", "Survived")
+
+write.csv(submission,"/Users/indiachina/Desktop/Kaggle/titanic/titanic_prediction.csv",row.names = FALSE)
+```
+
